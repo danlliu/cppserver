@@ -50,6 +50,8 @@ void Server::ListenForConnections() {
   socket_.Listen(kMAX_CONCURRENCY);
 
   if (!socket_) {
+    LOG(ERROR) << "Failed to bind/listen";
+    LOG(ERROR) << "errno = " << errno;
     LOG(FATAL) << "Failed to set up server!";
     return;
   }
@@ -135,7 +137,9 @@ void Server::HandleMessage(Socket client) {
     if (std::regex_match(request.target, match, path)) {
       endpoint_handlers_mutex_.ReaderUnlock();
       LOG(INFO) << "Matched endpoint " << request.target;
-      std::string response = handler(request);
+
+      // TODO(danlliu): Set up unordered_map
+      std::string response = handler(request, {});
       auto sent = client.Send(response.c_str(), response.size());
       LOG(INFO) << "Sent " << sent << " response bytes";
       return;

@@ -3,6 +3,7 @@
 #ifndef _CPPSERVER_HTTP_PARSER_H_
 #define _CPPSERVER_HTTP_PARSER_H_
 
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <utility>
@@ -38,9 +39,13 @@ class HTTPResponse {
     body_ = body;
   }
 
+  void LoadBodyFromFile(const std::filesystem::path& path);
+
   std::string ToString() const;
 
  private:
+  static const std::filesystem::path kserver_path_;
+
   std::string version_;
   int status_code_;
   std::string status_message_;

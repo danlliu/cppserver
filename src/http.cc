@@ -2,12 +2,15 @@
 
 #include "http.h"
 
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/strings/str_split.h"
 
 namespace cppserver {
@@ -141,6 +144,22 @@ HTTPResponse::HTTPResponse(int status_code)
   }
 }
 
+void HTTPResponse::LoadBodyFromFile(const std::filesystem::path& path) {
+  std::filesystem::path file_path = HTTPResponse::kserver_path_ / path;
+  LOG(INFO) << "Loading file " << file_path;
+
+  if (!std::filesystem::exists(file_path)) {
+    LOG(WARNING) << "File not found!";
+    status_code_ = 404;
+    status_message_ = "Not Found";
+  }
+
+  std::ifstream file(file_path);
+  std::string content((std::istreambuf_iterator<char>(file)),
+                      std::istreambuf_iterator<char>());
+  body_ = content;
+}
+
 std::string HTTPResponse::ToString() const {
   std::string status_line = version_ + " " + std::to_string(status_code_) + " " 
     + status_message_ + "\r\n";
@@ -152,5 +171,9 @@ std::string HTTPResponse::ToString() const {
   headers += "\r\n";
   return status_line + headers + body_;
 }
+
+const std::filesystem::path HTTPResponse::kserver_path_ = {
+  std::filesystem::current_path() / "src/server"
+};
 
 }  // namespace cppserver

@@ -1,5 +1,7 @@
 // Copyright 2022 Daniel Liu
 
+#include <signal.h>
+
 #include <iostream>
 #include <memory>
 #include <string>
@@ -17,7 +19,7 @@ std::string IndexHandler(
     [[maybe_unused]] std::unordered_map<std::string, std::string> params) {
   cppserver::HTTPResponse response(200);
   response.AddHeader("Content-Type", "text/html; encoding=utf-8");
-  response.SetBody("Hello, world!");
+  response.LoadBodyFromFile("static/index.html");
   return response.ToString();
 }
 
@@ -37,6 +39,7 @@ int main() {
 
   cppserver::Server server(8000);
   server.AddEndpointHandler("/", IndexHandler);
+
   return 0;
 }
 

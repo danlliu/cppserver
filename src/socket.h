@@ -51,9 +51,7 @@ class Socket {
 
   // Closes the socket.
   ~Socket() {
-    if (fd_ > 0) {
-      close(fd_);
-    }
+    Close();
   }
 
   Socket(const Socket&) = delete;
@@ -81,6 +79,14 @@ class Socket {
 
   // Bind the socket to the given address and port.
   void Bind(const SocketSockAddr& addr);
+
+  // Close the socket.
+  void Close() {
+    if (fd_ > 0) {
+      close(fd_);
+      fd_ = -1;
+    }
+  }
 
   // Connect to the given address and port.
   void Connect(const SocketSockAddr& addr);

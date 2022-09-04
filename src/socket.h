@@ -27,6 +27,7 @@ enum SocketType {
     kUDP  = SOCK_DGRAM,
 };
 
+// A more user-friendly wrapper for `struct sockaddr`.
 class SocketSockAddr {
  public:
   // Initializes the SockAddr struct with the given address and port.
@@ -40,9 +41,7 @@ class SocketSockAddr {
   struct sockaddr addr_;
 };
 
-/*
- * C++ wrapper for sockets.
- */
+// A wrapper for the C websocket interface.
 class Socket {
  public:
   // Initializes the socket with the given domain and type.
@@ -109,9 +108,11 @@ class Socket {
   explicit Socket(int fd) : fd_{fd}, status_{absl::OkStatus()} {}
 
   // File descriptor of the associated socket.
+  // fd_ is set to -1 if the socket is in an invalid state (usually since it
+  // was closed)
   int fd_;
 
-  // Used for constructor.
+  // Status of the socket; if an error occurs, status_ will be set.
   absl::Status status_;
 };
 

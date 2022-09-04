@@ -164,7 +164,7 @@ void HTTPResponse::LoadBodyFromFile(const std::string& path) {
 
 void HTTPResponse::RenderTemplateFile(
     const std::string& path, 
-    const std::unordered_map<std::string, templates::CONTEXT_TYPE>& context) {
+    const std::unordered_map<std::string, templates::TEMPLATE_OBJECT_ANY>& context) {
   std::filesystem::path file_path = HTTPResponse::kserver_path_ + path;
   LOG(INFO) << "Loading template file " << file_path;
 

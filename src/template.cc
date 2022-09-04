@@ -21,11 +21,11 @@ namespace templates {
 
 namespace ast {
 
-using TEMPLATE_TYPE = templates::TEMPLATE_TYPE;
-using CONTEXT_TYPE = templates::CONTEXT_TYPE;
+using TEMPLATE_BASIC_TYPE = templates::TEMPLATE_BASIC_TYPE_VARIANT;
+using TEMPLATE_OBJECT_ANY = templates::TEMPLATE_OBJECT_ANY;
 
-absl::StatusOr<TEMPLATE_TYPE> EvaluateBinaryOperator(
-    TEMPLATE_TYPE left, TEMPLATE_TYPE right, const std::string& op) {
+absl::StatusOr<TEMPLATE_BASIC_TYPE> EvaluateBinaryOperator(
+    TEMPLATE_BASIC_TYPE left, TEMPLATE_BASIC_TYPE right, const std::string& op) {
   if (op == "+") {
     // string + string = concatenation
     // int + int = int
@@ -151,8 +151,8 @@ class TemplateASTNode {
     children_.push_back(std::move(child));
   }
 
-  virtual absl::StatusOr<TEMPLATE_TYPE> Evaluate(
-      const std::unordered_map<std::string, CONTEXT_TYPE>& context) const = 0;
+  virtual absl::StatusOr<TEMPLATE_BASIC_TYPE> Evaluate(
+      const std::unordered_map<std::string, TEMPLATE_OBJECT_ANY>& context) const = 0;
 
  protected:
   std::vector<std::unique_ptr<TemplateASTNode>> children_;
@@ -160,21 +160,21 @@ class TemplateASTNode {
 
 class TemplateASTConstantNode : public TemplateASTNode {
  public:
-  TemplateASTConstantNode(TEMPLATE_TYPE value) : value_(value) {}
+  TemplateASTConstantNode(TEMPLATE_BASIC_TYPE value) : value_(value) {}
 
-  absl::StatusOr<TEMPLATE_TYPE> Evaluate(
-      [[maybe_unused]] const std::unordered_map<std::string, CONTEXT_TYPE>& 
+  absl::StatusOr<TEMPLATE_BASIC_TYPE> Evaluate(
+      [[maybe_unused]] const std::unordered_map<std::string, TEMPLATE_OBJECT_ANY>& 
           context) const {
     return value_;
   }
 
  private:
-  TEMPLATE_TYPE value_;
+  TEMPLATE_BASIC_TYPE value_;
 };
 
-absl::StatusOr<CONTEXT_TYPE> GetVariableFromContext(
+absl::StatusOr<TEMPLATE_OBJECT_ANY> GetVariableFromContext(
     const std::string& variable, 
-    const std::unordered_map<std::string, CONTEXT_TYPE>& context) {
+    const std::unordered_map<std::string, TEMPLATE_OBJECT_ANY>& context) {
   std::vector<std::string> components = absl::StrSplit(variable, '.');
   if (size(components) == 0) {
     return absl::InvalidArgumentError(
@@ -184,7 +184,7 @@ absl::StatusOr<CONTEXT_TYPE> GetVariableFromContext(
   if (context.find(components[0]) == context.end()) {
     return absl::InvalidArgumentError("Variable not found in context.");
   }
-  const CONTEXT_TYPE* indexing = &context.at(components[0]);
+  const TEMPLATE_OBJECT_ANY* indexing = &context.at(components[0]);
 
   for (int i = 1; i < size(components); ++i) {
     if (std::holds_alternative<TemplateObject>(*indexing)) {
@@ -206,8 +206,8 @@ class TemplateASTVariableNode : public TemplateASTNode {
   TemplateASTVariableNode(const std::string& variable_name)
       : name_(variable_name) {}
 
-  absl::StatusOr<TEMPLATE_TYPE> Evaluate(
-      const std::unordered_map<std::string, CONTEXT_TYPE>& context) const {
+  absl::StatusOr<TEMPLATE_BASIC_TYPE> Evaluate(
+      const std::unordered_map<std::string, TEMPLATE_OBJECT_ANY>& context) const {
     auto fetch = GetVariableFromContext(name_, context);
     if (!fetch.ok()) {
       return fetch.status();
@@ -221,6 +221,8 @@ class TemplateASTVariableNode : public TemplateASTNode {
       return std::get<int>(result);
     } else if (std::holds_alternative<double>(result)) {
       return std::get<double>(result);
+    } else if (std::holds_alternative<bool>(result)) {
+      return std::get<bool>(result);
     } else {
       return absl::InvalidArgumentError(
           "Invalid variable access; resulting value is not a TEMPLATE_TYPE");
@@ -236,8 +238,8 @@ class TemplateASTBinaryOperatorNode : public TemplateASTNode {
   TemplateASTBinaryOperatorNode(const std::string& operator_in)
       : operator_(operator_in) {}
 
-  absl::StatusOr<TEMPLATE_TYPE> Evaluate(
-      const std::unordered_map<std::string, CONTEXT_TYPE>& context) const {
+  absl::StatusOr<TEMPLATE_BASIC_TYPE> Evaluate(
+      const std::unordered_map<std::string, TEMPLATE_OBJECT_ANY>& context) const {
     if (children_.size() != 2) {
       return absl::InvalidArgumentError(
           "Binary operator must have 2 children.");
@@ -426,9 +428,9 @@ absl::StatusOr<std::unique_ptr<TemplateASTNode>> ParseString(
 
 }  // namespace ast
 
-absl::StatusOr<TEMPLATE_TYPE> EvaluateExpressionAsTemplateType(
+absl::StatusOr<TEMPLATE_BASIC_TYPE_VARIANT> EvaluateExpressionAsTemplateType(
     const std::string& expression,
-    const std::unordered_map<std::string, CONTEXT_TYPE>& context) {
+    const std::unordered_map<std::string, TEMPLATE_OBJECT_ANY>& context) {
   auto tree = ast::ParseString(expression);
   if (!tree.ok()) {
     return tree.status();
@@ -437,13 +439,13 @@ absl::StatusOr<TEMPLATE_TYPE> EvaluateExpressionAsTemplateType(
   if (!evaluated.ok()) {
     return evaluated.status();
   }
-  TEMPLATE_TYPE result = evaluated.value();
+  TEMPLATE_BASIC_TYPE_VARIANT result = evaluated.value();
   return result;
 }
 
 absl::StatusOr<std::string> EvaluateExpression(
     const std::string& expression,
-    const std::unordered_map<std::string, CONTEXT_TYPE>& context) {
+    const std::unordered_map<std::string, TEMPLATE_OBJECT_ANY>& context) {
   auto evaluated = EvaluateExpressionAsTemplateType(expression, context);
   if (!evaluated.ok()) {
     return evaluated.status();
@@ -523,11 +525,11 @@ absl::StatusOr<std::pair<std::string,
     std::vector<TemplateSegment>::iterator>> RenderTemplateHelper(
     std::vector<TemplateSegment>::iterator it,
     std::vector<TemplateSegment>::iterator end,
-    const std::unordered_map<std::string, CONTEXT_TYPE>& context,
+    const std::unordered_map<std::string, TEMPLATE_OBJECT_ANY>& context,
     std::optional<TemplateControlFlowExpression> control_flow_context) {
   std::string result = "";
 
-  for( ; it != end; ) {
+  for (; it != end; ) {
     if (std::holds_alternative<std::string>(*it)) {
       result += std::get<std::string>(*it);
       ++it;
@@ -544,8 +546,8 @@ absl::StatusOr<std::pair<std::string,
 
       if (expr.command == "for") {
         // Split body by "in"
-        std::vector<std::string> body_parts = absl::StrSplit(expr.expression, 
-                                                             " in ");
+        std::vector<std::string> body_parts = absl::StrSplit(
+            expr.expression, " in ");
         if (body_parts.size() != 2) {
           return absl::InvalidArgumentError(
               "Invalid for loop; expected \"for <var> in <expression>\".");
@@ -613,34 +615,103 @@ absl::StatusOr<std::pair<std::string,
         } else {
           std::stack<std::string> skip_operators;
           skip_operators.push("if");
+
+          bool found_else = false;
           while (it != end && !skip_operators.empty()) {
             if (std::holds_alternative<TemplateControlFlowExpression>(*it)) {
-              auto expr = std::get<TemplateControlFlowExpression>(*it);
-              if (expr.command == "for") {
+              auto cfe = std::get<TemplateControlFlowExpression>(*it);
+              if (cfe.command == "for") {
                 skip_operators.push("for");
-              } else if (expr.command == "endfor") {
+              } else if (cfe.command == "endfor") {
                 if (skip_operators.top() != "for") {
                   return absl::InvalidArgumentError(
                       "Invalid endfor; no matching for loop.");
                 }
                 skip_operators.pop();
-              } else if (expr.command == "if") {
+              } else if (cfe.command == "if") {
                 skip_operators.push("if");
-              } else if (expr.command == "endif") {
+              } else if (cfe.command == "endif") {
                 if (skip_operators.top() != "if") {
                   return absl::InvalidArgumentError(
                       "Invalid endif; no matching if statement.");
                 }
                 skip_operators.pop();
+              } else if (cfe.command == "else") {
+                if (skip_operators.top() != "if") {
+                  return absl::InvalidArgumentError(
+                      "Invalid else; no matching if statement.");
+                }
+                if (size(skip_operators) == 1) {
+                  found_else = true;
+                  break;  // break out of while loop
+                }
+              } else {
+                return absl::InvalidArgumentError(
+                    "Invalid control flow command; expected \"for\", \"endfor\", "
+                    "\"if\", \"else\", or \"endif\".");
               }
-              // TOOD: else
             }
             ++it;
           }
-          // TODO: else
+
+          if (found_else) {
+            auto else_statement = std::get<TemplateControlFlowExpression>(*it);
+            ++it;
+            auto rendered = RenderTemplateHelper(it, end, context, else_statement);
+            if (!rendered.ok()) {
+              LOG(WARNING) << "Couldn't render else statement";
+              return rendered.status();
+            }
+            auto [rendered_string, new_it] = rendered.value();
+            result += rendered_string;
+            it = new_it;
+          }
+        }
+      } else if (expr.command == "else") {
+        if (control_flow_context && control_flow_context->command == "if") {
+          // We've reached the end of the if statement that we're rendering.
+          // Need to skip ahead past the else clause.
+
+          std::stack<std::string> skip_operators;
+          skip_operators.push("if");
+
+          while (it != end && !skip_operators.empty()) {
+            if (std::holds_alternative<TemplateControlFlowExpression>(*it)) {
+              auto cfe = std::get<TemplateControlFlowExpression>(*it);
+              if (cfe.command == "for") {
+                skip_operators.push("for");
+              } else if (cfe.command == "endfor") {
+                if (skip_operators.top() != "for") {
+                  return absl::InvalidArgumentError(
+                      "Invalid endfor; no matching for loop.");
+                }
+                skip_operators.pop();
+              } else if (cfe.command == "if") {
+                skip_operators.push("if");
+              } else if (cfe.command == "endif") {
+                if (skip_operators.top() != "if") {
+                  return absl::InvalidArgumentError(
+                      "Invalid endif; no matching if statement.");
+                }
+                skip_operators.pop();
+              } else if (cfe.command == "else") {
+                if (skip_operators.top() != "if") {
+                  return absl::InvalidArgumentError(
+                      "Invalid else; no matching if statement.");
+                }
+              } else {
+                return absl::InvalidArgumentError(
+                    "Invalid control flow command; expected \"for\", \"endfor\", "
+                    "\"if\", \"else\", or \"endif\".");
+              }
+            }
+            ++it;
+          }
         }
       } else if (expr.command == "endif") {
-        if (control_flow_context && control_flow_context->command == "if") {
+        if (control_flow_context 
+            && (control_flow_context->command == "if"
+                || control_flow_context->command == "else")) {
           ++it;
           return std::make_pair(result, it);
         } else {
@@ -650,7 +721,7 @@ absl::StatusOr<std::pair<std::string,
       } else {
         return absl::InvalidArgumentError(
             "Invalid control flow command; expected \"for\", \"endfor\", "
-            "\"if\", or \"endif\".");
+            "\"if\", \"else\", or \"endif\".");
       }
     }
   }
@@ -659,7 +730,7 @@ absl::StatusOr<std::pair<std::string,
 
 absl::StatusOr<std::string> RenderTemplate(
     const std::string& template_str,
-    const std::unordered_map<std::string, CONTEXT_TYPE>& context) {
+    const std::unordered_map<std::string, TEMPLATE_OBJECT_ANY>& context) {
   auto tokenized = TokenizeTemplate(template_str);
   auto rendered = RenderTemplateHelper(begin(tokenized), end(tokenized), 
                                        context, {});

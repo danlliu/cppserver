@@ -46,7 +46,7 @@ class HTTPResponse {
 
   void RenderTemplateFile(
       const std::string& path, 
-      const std::unordered_map<std::string, templates::CONTEXT_TYPE>& context);
+      const std::unordered_map<std::string, templates::TEMPLATE_OBJECT_ANY>& context);
 
   std::string ToString() const;
 

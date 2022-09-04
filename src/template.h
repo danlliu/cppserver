@@ -17,7 +17,7 @@ namespace cppserver {
 namespace templates {
 
 // Supported types as of now!
-using TEMPLATE_TYPE = std::variant<std::string, int, double, bool>;
+using TEMPLATE_BASIC_TYPE_VARIANT = std::variant<std::string, int, double, bool>;
 
 template <typename K>
 class GeneralTemplateMap {
@@ -60,15 +60,15 @@ class GeneralTemplateMap {
 
 using TemplateObject = GeneralTemplateMap<std::string>;
 using TemplateList = GeneralTemplateMap<int>;
-using CONTEXT_TYPE = GeneralTemplateMap<int>::V;
+using TEMPLATE_OBJECT_ANY = GeneralTemplateMap<int>::V;
 
 absl::StatusOr<std::string> EvaluateExpression(
     const std::string& expression,
-    const std::unordered_map<std::string, CONTEXT_TYPE>& context);
+    const std::unordered_map<std::string, TEMPLATE_OBJECT_ANY>& context);
 
 absl::StatusOr<std::string> RenderTemplate(
     const std::string& template_str,
-    const std::unordered_map<std::string, CONTEXT_TYPE>& context);
+    const std::unordered_map<std::string, TEMPLATE_OBJECT_ANY>& context);
 
 }  // namespace templates
 

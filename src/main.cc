@@ -8,10 +8,12 @@
 #include <unordered_map>
 
 #include "absl/log/initialize.h"
+#include "absl/log/log.h"
 #include "absl/log/log_sink.h"
 #include "absl/log/log_sink_registry.h"
 
 #include "http.h"
+#include "template.h"
 #include "server.h"
 
 std::string IndexHandler(
@@ -20,6 +22,19 @@ std::string IndexHandler(
   cppserver::HTTPResponse response(200);
   response.AddHeader("Content-Type", "text/html; encoding=utf-8");
   response.LoadBodyFromFile("static/index.html");
+  return response.ToString();
+}
+
+std::string PathHandler(
+    cppserver::HTTPRequest request, 
+    std::unordered_map<std::string, std::string> params) {
+  cppserver::HTTPResponse response(200);
+  response.AddHeader("Content-Type", "text/html; encoding=utf-8");
+  response.LoadBodyFromFile("templates/path.html");
+  LOG(INFO) << "path = " << params["path"];
+  response.RenderTemplateFile(
+      "templates/path.html", 
+      {{"path", params["path"]}});
   return response.ToString();
 }
 
@@ -39,6 +54,7 @@ int main() {
 
   cppserver::Server server(8000);
   server.AddEndpointHandler("/", IndexHandler);
+  server.AddEndpointHandler("/path/<path>/", PathHandler);
 
   return 0;
 }

@@ -31,13 +31,25 @@ void Server::AddEndpointHandler(
     std::function<std::string(
         HTTPRequest, std::unordered_map<std::string, std::string>)> handler) {
   endpoint_handlers_mutex_.WriterLock();
+  std::vector<std::string> components;
+  // Get each component (within <>).
+  std::regex component_regex("<(.*)>");
+  std::sregex_iterator component_it(endpoint.begin(), endpoint.end(), 
+      component_regex);
+  std::sregex_iterator component_end;
+  while (component_it != component_end) {
+    std::smatch match = *component_it;
+    components.push_back(match[1]);
+    ++component_it;
+  }
   // Preprocess the string, replacing `<.*>` with `(.*)`.
   std::regex endpoint_regex {std::regex_replace(endpoint, 
       std::regex("<.*>"), "(.*)")};
   
   LOG(INFO) << "Adding endpoint handler for endpoint " << endpoint;
 
-  endpoint_handlers_.emplace_back(std::regex(endpoint_regex), handler);
+  endpoint_handlers_.push_back({
+      std::regex(endpoint_regex), components, handler});
   endpoint_handlers_mutex_.WriterUnlock();
 }
 
@@ -132,14 +144,19 @@ void Server::HandleMessage(Socket client) {
   // Look through endpoints, find the first one that matches the request.
 
   endpoint_handlers_mutex_.ReaderLock();
-  for (auto [path, handler] : endpoint_handlers_) {
+  for (auto [path, component_names, handler] : endpoint_handlers_) {
     std::smatch match;
     if (std::regex_match(request.target, match, path)) {
       endpoint_handlers_mutex_.ReaderUnlock();
       LOG(INFO) << "Matched endpoint " << request.target;
 
-      // TODO(danlliu): Set up unordered_map
-      std::string response = handler(request, {});
+      std::unordered_map<std::string, std::string> url_components;
+      for (size_t i = 0; i < size(component_names); ++i) {
+        LOG(INFO) << component_names[i] << " = " << match[i + 1];
+        url_components[component_names[i]] = match[i + 1];
+      }
+
+      std::string response = handler(request, std::move(url_components));
       auto sent = client.Send(response.c_str(), response.size());
       LOG(INFO) << "Sent " << sent << " response bytes";
       return;

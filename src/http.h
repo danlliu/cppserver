@@ -6,8 +6,11 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include "template.h"
 
 namespace cppserver {
 
@@ -39,12 +42,16 @@ class HTTPResponse {
     body_ = body;
   }
 
-  void LoadBodyFromFile(const std::filesystem::path& path);
+  void LoadBodyFromFile(const std::string& path);
+
+  void RenderTemplateFile(
+      const std::string& path, 
+      const std::unordered_map<std::string, templates::CONTEXT_TYPE>& context);
 
   std::string ToString() const;
 
  private:
-  static const std::filesystem::path kserver_path_;
+  static const std::string kserver_path_;
 
   std::string version_;
   int status_code_;

@@ -57,8 +57,9 @@ class Server {
   std::thread listening_thread_;
 
   // Endpoint handlers.
-  std::vector<std::pair<std::regex, std::function<std::string(
-      HTTPRequest, std::unordered_map<std::string, std::string>)>>>
+  std::vector<std::tuple<std::regex, std::vector<std::string>, 
+      std::function<std::string(HTTPRequest, 
+                                std::unordered_map<std::string, std::string>)>>>
       endpoint_handlers_;
 
   // Mutex for endpoint handlers.

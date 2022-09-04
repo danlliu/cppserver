@@ -13,12 +13,16 @@
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_split.h"
 
 namespace cppserver {
 
 namespace templates {
 
 namespace ast {
+
+using TEMPLATE_TYPE = templates::TEMPLATE_TYPE;
+using CONTEXT_TYPE = templates::CONTEXT_TYPE;
 
 absl::StatusOr<TEMPLATE_TYPE> EvaluateBinaryOperator(
     TEMPLATE_TYPE left, TEMPLATE_TYPE right, const std::string& op) {
@@ -128,7 +132,7 @@ class TemplateASTNode {
   }
 
   virtual absl::StatusOr<TEMPLATE_TYPE> Evaluate(
-      const std::unordered_map<std::string, TEMPLATE_TYPE>& context) const = 0;
+      const std::unordered_map<std::string, CONTEXT_TYPE>& context) const = 0;
 
  protected:
   std::vector<std::unique_ptr<TemplateASTNode>> children_;
@@ -139,7 +143,8 @@ class TemplateASTConstantNode : public TemplateASTNode {
   TemplateASTConstantNode(TEMPLATE_TYPE value) : value_(value) {}
 
   absl::StatusOr<TEMPLATE_TYPE> Evaluate(
-      const std::unordered_map<std::string, TEMPLATE_TYPE>& context) const {
+      [[maybe_unused]] const std::unordered_map<std::string, CONTEXT_TYPE>& 
+          context) const {
     return value_;
   }
 
@@ -153,13 +158,42 @@ class TemplateASTVariableNode : public TemplateASTNode {
       : name_(variable_name) {}
 
   absl::StatusOr<TEMPLATE_TYPE> Evaluate(
-      const std::unordered_map<std::string, TEMPLATE_TYPE>& context) const {
-    auto it = context.find(name_);
-    if (it == context.end()) {
-      return absl::StatusOr<TEMPLATE_TYPE>(
-          absl::InvalidArgumentError("Variable not found in context."));
+      const std::unordered_map<std::string, CONTEXT_TYPE>& context) const {
+    std::vector<std::string> components = absl::StrSplit(name_, '.');
+    if (size(components) == 0) {
+      return absl::InvalidArgumentError(
+          "Invalid variable name; variable name cannot be empty.");
     }
-    return it->second;
+    
+    if (context.find(components[0]) == context.end()) {
+      return absl::InvalidArgumentError("Variable not found in context.");
+    }
+    const CONTEXT_TYPE* indexing = &context.at(components[0]);
+
+    for (int i = 1; i < size(components); ++i) {
+      if (std::holds_alternative<TemplateObject>(*indexing)) {
+        auto o = std::reference_wrapper(std::get<TemplateObject>(*indexing));
+        if (!o.get().ContainsKey(components[i])) {
+          return absl::InvalidArgumentError("Variable not found in context.");
+        }
+        indexing = &o.get().at(components[i]);
+      } else {
+        return absl::InvalidArgumentError(
+            "Invalid variable access; attempting to lookup key in a non-object.");
+      }
+    }
+
+    // Type check on `indexing`.
+    if (std::holds_alternative<std::string>(*indexing)) {
+      return std::get<std::string>(*indexing);
+    } else if (std::holds_alternative<int>(*indexing)) {
+      return std::get<int>(*indexing);
+    } else if (std::holds_alternative<double>(*indexing)) {
+      return std::get<double>(*indexing);
+    } else {
+      return absl::InvalidArgumentError(
+          "Invalid variable access; resulting value is not a TEMPLATE_TYPE");
+    }
   }
 
  private:
@@ -172,19 +206,19 @@ class TemplateASTBinaryOperatorNode : public TemplateASTNode {
       : operator_(operator_in) {}
 
   absl::StatusOr<TEMPLATE_TYPE> Evaluate(
-      const std::unordered_map<std::string, TEMPLATE_TYPE>& context) const {
+      const std::unordered_map<std::string, CONTEXT_TYPE>& context) const {
     if (children_.size() != 2) {
-      return absl::StatusOr<TEMPLATE_TYPE>(
-          absl::InvalidArgumentError("Binary operator must have 2 children."));
+      return absl::InvalidArgumentError(
+          "Binary operator must have 2 children.");
     }
 
     auto left = children_[0]->Evaluate(context);
     if (!left.ok()) {
-      return absl::StatusOr<TEMPLATE_TYPE>(left.status());
+      return left.status();
     }
     auto right = children_[1]->Evaluate(context);
     if (!right.ok()) {
-      return absl::StatusOr<TEMPLATE_TYPE>(right.status());
+      return right.status();
     }
 
     return EvaluateBinaryOperator(left.value(), right.value(), operator_);
@@ -341,14 +375,14 @@ absl::StatusOr<std::unique_ptr<TemplateASTNode>> ParseString(
 
 absl::StatusOr<std::string> EvaluateExpression(
     const std::string& expression,
-    const std::unordered_map<std::string, TEMPLATE_TYPE>& context) {
+    const std::unordered_map<std::string, CONTEXT_TYPE>& context) {
   auto tree = ast::ParseString(expression);
   if (!tree.ok()) {
-    return absl::StatusOr<std::string>(tree.status());
+    return tree.status();
   }
   auto evaluated = tree.value()->Evaluate(context);
   if (!evaluated.ok()) {
-    return absl::StatusOr<std::string>(evaluated.status());
+    return evaluated.status();
   }
   TEMPLATE_TYPE result = evaluated.value();
   if (std::holds_alternative<std::string>(result)) {
@@ -358,9 +392,8 @@ absl::StatusOr<std::string> EvaluateExpression(
   } else if (std::holds_alternative<double>(result)) {
     return std::to_string(std::get<double>(result));
   } else {
-    return absl::StatusOr<std::string>(
-        absl::InvalidArgumentError(
-            "Invalid expression; expression evaluated to unknown type."));
+    return absl::InvalidArgumentError(
+            "Invalid expression; expression evaluated to unknown type.");
   }
 }
 
@@ -368,16 +401,21 @@ struct TemplateInterpolationExpression {
   std::string expression;
 };
 
-// TODO: add support for TemplateControlFlowExpressions
+struct TemplateControlFlowExpression {
+  std::string command;
+  std::string expression;
+};
 
 using TemplateSegment = std::variant<std::string,
-                                     TemplateInterpolationExpression>;
+                                     TemplateInterpolationExpression,
+                                     TemplateControlFlowExpression>;
                                     
 std::vector<TemplateSegment> TokenizeTemplate(const std::string& template_str) {
   std::vector<TemplateSegment> segments;
 
   // Regexes
   std::regex interpolation_regex {"(\\{\\{(.*?)\\}\\}).*"};
+  std::regex control_flow_regex {"(\\{\\%\\s*(\\w+)\\s+(.*?)\\s*\\%\\}).*"};
 
   auto it = begin(template_str);
   auto end_it = end(template_str);
@@ -394,6 +432,14 @@ std::vector<TemplateSegment> TokenizeTemplate(const std::string& template_str) {
       }
       segments.push_back(TemplateInterpolationExpression{match[2]});
       it += match[1].length();
+    } else if (std::regex_search(it, end_it, match, control_flow_regex)
+               && match.prefix().length() == 0) {
+      if (!plain_text.empty()) {
+        segments.push_back(plain_text);
+        plain_text.clear();
+      }
+      segments.push_back(TemplateControlFlowExpression{match[2], match[3]});
+      it += match[1].length();
     } else {
       plain_text += *it;
       ++it;
@@ -407,9 +453,16 @@ std::vector<TemplateSegment> TokenizeTemplate(const std::string& template_str) {
   return segments;
 }
 
+// absl::StatusOr<std::string> RenderTemplateHelper(
+//     const std::string& template_str,
+//     const std::unordered_map<std::string, CONTEXT_TYPE>& context,
+//     std::optional<TemplateControlFlowExpression> control_flow_context) {
+
+// }
+
 absl::StatusOr<std::string> RenderTemplate(
     const std::string& template_str,
-    const std::unordered_map<std::string, TEMPLATE_TYPE>& context) {
+    const std::unordered_map<std::string, CONTEXT_TYPE>& context) {
   auto tokenized = TokenizeTemplate(template_str);
   std::string result = "";
   for (auto segment : tokenized) {
@@ -419,7 +472,7 @@ absl::StatusOr<std::string> RenderTemplate(
       auto expression = std::get<TemplateInterpolationExpression>(segment);
       auto evaluated = EvaluateExpression(expression.expression, context);
       if (!evaluated.ok()) {
-        return absl::StatusOr<std::string>(evaluated.status());
+        return evaluated.status();
       }
       result += evaluated.value();
     }

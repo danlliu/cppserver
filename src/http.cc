@@ -13,6 +13,8 @@
 #include "absl/log/log.h"
 #include "absl/strings/str_split.h"
 
+#include "template.h"
+
 namespace cppserver {
 
 std::optional<int> DetermineRemainingHTTPContentLength(const std::string& msg) {
@@ -144,8 +146,8 @@ HTTPResponse::HTTPResponse(int status_code)
   }
 }
 
-void HTTPResponse::LoadBodyFromFile(const std::filesystem::path& path) {
-  std::filesystem::path file_path = HTTPResponse::kserver_path_ / path;
+void HTTPResponse::LoadBodyFromFile(const std::string& path) {
+  std::filesystem::path file_path = HTTPResponse::kserver_path_ + path;
   LOG(INFO) << "Loading file " << file_path;
 
   if (!std::filesystem::exists(file_path)) {
@@ -160,6 +162,30 @@ void HTTPResponse::LoadBodyFromFile(const std::filesystem::path& path) {
   body_ = content;
 }
 
+void HTTPResponse::RenderTemplateFile(
+    const std::string& path, 
+    const std::unordered_map<std::string, templates::CONTEXT_TYPE>& context) {
+  std::filesystem::path file_path = HTTPResponse::kserver_path_ + path;
+  LOG(INFO) << "Loading template file " << file_path;
+
+  if (!std::filesystem::exists(file_path)) {
+    LOG(WARNING) << "File not found!";
+    status_code_ = 404;
+    status_message_ = "Not Found";
+  }
+
+  std::ifstream file(file_path);
+  std::string content((std::istreambuf_iterator<char>(file)),
+                      std::istreambuf_iterator<char>());
+  auto rendered = templates::RenderTemplate(content, context);
+  if (!rendered.ok()) {
+    LOG(WARNING) << "Failed to render template!";
+    status_code_ = 500;
+    status_message_ = "Internal Server Error";
+  }
+  body_ = rendered.value();
+}
+
 std::string HTTPResponse::ToString() const {
   std::string status_line = version_ + " " + std::to_string(status_code_) + " " 
     + status_message_ + "\r\n";
@@ -172,8 +198,6 @@ std::string HTTPResponse::ToString() const {
   return status_line + headers + body_;
 }
 
-const std::filesystem::path HTTPResponse::kserver_path_ = {
-  std::filesystem::current_path() / "src/server"
-};
+const std::string HTTPResponse::kserver_path_ = "src/server/";
 
 }  // namespace cppserver

@@ -175,3 +175,39 @@ TEST(TemplateTests, NestedObjectTemplate) {
   EXPECT_TRUE(actual.ok());
   EXPECT_EQ(expected, actual.value());
 }
+
+TEST(TemplateTests, TakenIfTemplate) {
+  std::string template_str = "Hello{% if a == 1 %}, world{% endif %}!";
+  std::unordered_map<std::string, CONTEXT_TYPE> context = {
+    {"a", 1}
+  };
+  std::string expected = "Hello, world!";
+  auto actual = RenderTemplate(template_str, context);
+  EXPECT_TRUE(actual.ok());
+  EXPECT_EQ(expected, actual.value());
+}
+
+TEST(TemplateTests, NotTakenIfTemplate) {
+  std::string template_str = "Hello{% if a == 1 %}, world{% endif %}!";
+  std::unordered_map<std::string, CONTEXT_TYPE> context = {
+    {"a", 2}
+  };
+  std::string expected = "Hello!";
+  auto actual = RenderTemplate(template_str, context);
+  EXPECT_TRUE(actual.ok());
+  EXPECT_EQ(expected, actual.value());
+}
+
+TEST(TemplateTests, ForLoopTemplate) {
+  std::string template_str = "Hello, {% for name in names %}{{name}}{% endfor %}";
+  std::unordered_map<std::string, CONTEXT_TYPE> context = {
+    {"names", TemplateList{
+      "world",
+      "!",
+    }}
+  };
+  std::string expected = "Hello, world!";
+  auto actual = RenderTemplate(template_str, context);
+  EXPECT_TRUE(actual.ok());
+  EXPECT_EQ(expected, actual.value());
+}

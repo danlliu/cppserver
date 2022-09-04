@@ -16,6 +16,7 @@
 #include "absl/synchronization/mutex.h"
 
 #include "http.h"
+#include "url.h"
 #include "socket.h"
 
 namespace cppserver {

@@ -31,10 +31,10 @@ std::string PathHandler(
   cppserver::HTTPResponse response(200);
   response.AddHeader("Content-Type", "text/html; encoding=utf-8");
   response.LoadBodyFromFile("templates/path.html");
-  LOG(INFO) << "path = " << params["path"];
+  LOG(INFO) << "path = " << cppserver::UnquoteUrl(params["path"]);
   response.RenderTemplateFile(
       "templates/path.html", 
-      {{"path", params["path"]}});
+      {{"path", cppserver::UnquoteUrl(params["path"])}});
   return response.ToString();
 }
 

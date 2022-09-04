@@ -1,5 +1,14 @@
 
 cc_library(
+  name = "url",
+  srcs = ["url.cc"],
+  hdrs = ["url.h"],
+  deps = [
+    "@com_google_absl//absl/strings:str_format",
+  ],
+)
+
+cc_library(
   name = "template",
   srcs = ["template.cc"],
   hdrs = ["template.h"],
@@ -51,6 +60,7 @@ cc_library(
     "@com_google_absl//absl/synchronization",
     ":http",
     ":socket",
+    ":url",
   ],
 )
 

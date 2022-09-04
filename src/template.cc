@@ -116,8 +116,28 @@ absl::StatusOr<TEMPLATE_TYPE> EvaluateBinaryOperator(
     } else {
       return absl::InvalidArgumentError("Invalid types for binary operator");
     }
+  } else if (op == "==") {
+    // same rules as -
+    if (std::holds_alternative<int>(left) &&
+        std::holds_alternative<int>(right)) {
+      return std::get<int>(left) == std::get<int>(right);
+    } else if (std::holds_alternative<int>(left) &&
+                std::holds_alternative<double>(right)) {
+      return std::get<int>(left) == std::get<double>(right);
+    } else if (std::holds_alternative<double>(left) &&
+                std::holds_alternative<int>(right)) {
+      return std::get<double>(left) == std::get<int>(right);
+    } else if (std::holds_alternative<double>(left) &&
+                std::holds_alternative<double>(right)) {
+      return std::get<double>(left) == std::get<double>(right);
+    } else if (std::holds_alternative<std::string>(left) &&
+                std::holds_alternative<std::string>(right)) {
+      return std::get<std::string>(left) == std::get<std::string>(right);
+    } else {
+      return absl::InvalidArgumentError("Invalid types for binary operator");
+    }
   } else {
-    return absl::InvalidArgumentError("Invalid binary operator");
+    return absl::InvalidArgumentError("Invalid binary operator " + op);
   }
 }
 
@@ -152,6 +172,35 @@ class TemplateASTConstantNode : public TemplateASTNode {
   TEMPLATE_TYPE value_;
 };
 
+absl::StatusOr<CONTEXT_TYPE> GetVariableFromContext(
+    const std::string& variable, 
+    const std::unordered_map<std::string, CONTEXT_TYPE>& context) {
+  std::vector<std::string> components = absl::StrSplit(variable, '.');
+  if (size(components) == 0) {
+    return absl::InvalidArgumentError(
+        "Invalid variable name; variable name cannot be empty.");
+  }
+  
+  if (context.find(components[0]) == context.end()) {
+    return absl::InvalidArgumentError("Variable not found in context.");
+  }
+  const CONTEXT_TYPE* indexing = &context.at(components[0]);
+
+  for (int i = 1; i < size(components); ++i) {
+    if (std::holds_alternative<TemplateObject>(*indexing)) {
+      auto o = std::reference_wrapper(std::get<TemplateObject>(*indexing));
+      if (!o.get().ContainsKey(components[i])) {
+        return absl::InvalidArgumentError("Variable not found in context.");
+      }
+      indexing = &o.get().at(components[i]);
+    } else {
+      return absl::InvalidArgumentError(
+          "Invalid variable access; attempting to lookup key in a non-object.");
+    }
+  }
+  return *indexing;
+}
+
 class TemplateASTVariableNode : public TemplateASTNode {
  public:
   TemplateASTVariableNode(const std::string& variable_name)
@@ -159,37 +208,19 @@ class TemplateASTVariableNode : public TemplateASTNode {
 
   absl::StatusOr<TEMPLATE_TYPE> Evaluate(
       const std::unordered_map<std::string, CONTEXT_TYPE>& context) const {
-    std::vector<std::string> components = absl::StrSplit(name_, '.');
-    if (size(components) == 0) {
-      return absl::InvalidArgumentError(
-          "Invalid variable name; variable name cannot be empty.");
+    auto fetch = GetVariableFromContext(name_, context);
+    if (!fetch.ok()) {
+      return fetch.status();
     }
-    
-    if (context.find(components[0]) == context.end()) {
-      return absl::InvalidArgumentError("Variable not found in context.");
-    }
-    const CONTEXT_TYPE* indexing = &context.at(components[0]);
-
-    for (int i = 1; i < size(components); ++i) {
-      if (std::holds_alternative<TemplateObject>(*indexing)) {
-        auto o = std::reference_wrapper(std::get<TemplateObject>(*indexing));
-        if (!o.get().ContainsKey(components[i])) {
-          return absl::InvalidArgumentError("Variable not found in context.");
-        }
-        indexing = &o.get().at(components[i]);
-      } else {
-        return absl::InvalidArgumentError(
-            "Invalid variable access; attempting to lookup key in a non-object.");
-      }
-    }
+    auto result = fetch.value();
 
     // Type check on `indexing`.
-    if (std::holds_alternative<std::string>(*indexing)) {
-      return std::get<std::string>(*indexing);
-    } else if (std::holds_alternative<int>(*indexing)) {
-      return std::get<int>(*indexing);
-    } else if (std::holds_alternative<double>(*indexing)) {
-      return std::get<double>(*indexing);
+    if (std::holds_alternative<std::string>(result)) {
+      return std::get<std::string>(result);
+    } else if (std::holds_alternative<int>(result)) {
+      return std::get<int>(result);
+    } else if (std::holds_alternative<double>(result)) {
+      return std::get<double>(result);
     } else {
       return absl::InvalidArgumentError(
           "Invalid variable access; resulting value is not a TEMPLATE_TYPE");
@@ -267,6 +298,22 @@ std::vector<std::string> TokenizeString(const std::string& expression) {
           token.clear();
         }
         tokens.push_back(std::string(1, c));
+      } else if (c == '=') {
+        auto peek = it + 1;
+        if (peek != end_it && *peek == '=') {
+          if (!token.empty()) {
+            tokens.push_back(token);
+            token.clear();
+          }
+          tokens.push_back("==");
+          ++it;
+        } else {
+          if (!token.empty()) {
+            tokens.push_back(token);
+            token.clear();
+          }
+          tokens.push_back(std::string(1, c));
+        }
       } else {
         token += c;
       }
@@ -279,6 +326,18 @@ std::vector<std::string> TokenizeString(const std::string& expression) {
   }
 
   return tokens;
+}
+
+int GetPrecedence(const std::string& op) {
+  if (op == "+" || op == "-") {
+    return 1;
+  } else if (op == "*" || op == "/") {
+    return 2;
+  } else if (op == "==") {
+    return 3;
+  } else {
+    return 0;
+  }
 }
 
 absl::StatusOr<std::unique_ptr<TemplateASTNode>> ParseString(
@@ -304,15 +363,9 @@ absl::StatusOr<std::unique_ptr<TemplateASTNode>> ParseString(
         return absl::InvalidArgumentError("Mismatched parentheses.");
       }
       operators.pop();
-    } else if (token == "+" || token == "-") {
-      while (!operators.empty() && operators.top() != "(") {
-        rpn.push_back(operators.top());
-        operators.pop();
-      }
-      operators.push(token);
-    } else if (token == "*" || token == "/") {
-      while (!operators.empty() && 
-             (operators.top() == "*" || operators.top() == "/")) {
+    } else if (GetPrecedence(token) > 0) {
+      while (!operators.empty() && operators.top() != "("
+             && (GetPrecedence(token) <= GetPrecedence(operators.top()))) {
         rpn.push_back(operators.top());
         operators.pop();
       }
@@ -334,7 +387,7 @@ absl::StatusOr<std::unique_ptr<TemplateASTNode>> ParseString(
   std::stack<std::unique_ptr<TemplateASTNode>> ast_stack;
 
   for (auto token : rpn) {
-    if (token == "+" || token == "-" || token == "*" || token == "/") {
+    if (GetPrecedence(token) > 0) {
       if (ast_stack.size() < 2) {
         return absl::InvalidArgumentError(
             "Invalid expression; not enough operands to binary operation.");
@@ -373,7 +426,7 @@ absl::StatusOr<std::unique_ptr<TemplateASTNode>> ParseString(
 
 }  // namespace ast
 
-absl::StatusOr<std::string> EvaluateExpression(
+absl::StatusOr<TEMPLATE_TYPE> EvaluateExpressionAsTemplateType(
     const std::string& expression,
     const std::unordered_map<std::string, CONTEXT_TYPE>& context) {
   auto tree = ast::ParseString(expression);
@@ -385,12 +438,25 @@ absl::StatusOr<std::string> EvaluateExpression(
     return evaluated.status();
   }
   TEMPLATE_TYPE result = evaluated.value();
+  return result;
+}
+
+absl::StatusOr<std::string> EvaluateExpression(
+    const std::string& expression,
+    const std::unordered_map<std::string, CONTEXT_TYPE>& context) {
+  auto evaluated = EvaluateExpressionAsTemplateType(expression, context);
+  if (!evaluated.ok()) {
+    return evaluated.status();
+  }
+  auto result = evaluated.value();
   if (std::holds_alternative<std::string>(result)) {
     return std::get<std::string>(result);
   } else if (std::holds_alternative<int>(result)) {
     return std::to_string(std::get<int>(result));
   } else if (std::holds_alternative<double>(result)) {
     return std::to_string(std::get<double>(result));
+  } else if (std::holds_alternative<bool>(result)) {
+    return std::to_string(std::get<bool>(result));
   } else {
     return absl::InvalidArgumentError(
             "Invalid expression; expression evaluated to unknown type.");
@@ -453,31 +519,154 @@ std::vector<TemplateSegment> TokenizeTemplate(const std::string& template_str) {
   return segments;
 }
 
-// absl::StatusOr<std::string> RenderTemplateHelper(
-//     const std::string& template_str,
-//     const std::unordered_map<std::string, CONTEXT_TYPE>& context,
-//     std::optional<TemplateControlFlowExpression> control_flow_context) {
+absl::StatusOr<std::pair<std::string, 
+    std::vector<TemplateSegment>::iterator>> RenderTemplateHelper(
+    std::vector<TemplateSegment>::iterator it,
+    std::vector<TemplateSegment>::iterator end,
+    const std::unordered_map<std::string, CONTEXT_TYPE>& context,
+    std::optional<TemplateControlFlowExpression> control_flow_context) {
+  std::string result = "";
 
-// }
+  for( ; it != end; ) {
+    if (std::holds_alternative<std::string>(*it)) {
+      result += std::get<std::string>(*it);
+      ++it;
+    } else if (std::holds_alternative<TemplateInterpolationExpression>(*it)) {
+      auto expr = std::get<TemplateInterpolationExpression>(*it).expression;
+      auto evaluated = EvaluateExpression(expr, context);
+      if (!evaluated.ok()) {
+        return evaluated.status();
+      }
+      result += evaluated.value();
+      ++it;
+    } else if (std::holds_alternative<TemplateControlFlowExpression>(*it)) {
+      auto expr = std::get<TemplateControlFlowExpression>(*it);
+
+      if (expr.command == "for") {
+        // Split body by "in"
+        std::vector<std::string> body_parts = absl::StrSplit(expr.expression, 
+                                                             " in ");
+        if (body_parts.size() != 2) {
+          return absl::InvalidArgumentError(
+              "Invalid for loop; expected \"for <var> in <expression>\".");
+        }
+        auto variable_name = body_parts[0];
+        auto expression = body_parts[1];
+
+        // Ensure expression is valid and an array.
+        auto fetch = ast::GetVariableFromContext(expression, context);
+        if (!fetch.ok()) {
+          return fetch.status();
+        }
+        auto variable = fetch.value();
+        if (!std::holds_alternative<TemplateList>(variable)) {
+          return absl::InvalidArgumentError(
+              "Invalid for loop; expression does not evaluate to an array.");
+        }
+        auto array = std::get<TemplateList>(variable);
+
+        ++it;
+        auto new_it = it;
+        // Evaluate expression for each variable in the array.
+        for (int i = 0; i < array.size(); ++i) {
+          auto new_context = context;
+          new_context[variable_name] = array[i];
+
+          auto rendered = RenderTemplateHelper(it, end, new_context, expr);
+          if (!rendered.ok()) {
+            return rendered.status();
+          }
+          result += rendered.value().first;
+          new_it = rendered.value().second;
+        }
+        it = new_it;
+      } else if (expr.command == "endfor") {
+        if (control_flow_context && control_flow_context->command == "for") {
+          ++it;
+          return std::make_pair(result, it);
+        } else {
+          return absl::InvalidArgumentError(
+              "Invalid endfor; no matching for loop.");
+        }
+      } else if (expr.command == "if") {
+        auto expression = expr.expression;
+        auto evaluated = EvaluateExpressionAsTemplateType(expression, context);
+        if (!evaluated.ok()) {
+          return evaluated.status();
+        }
+        auto value = evaluated.value();
+        if (!std::holds_alternative<bool>(value)) {
+          return absl::InvalidArgumentError(
+              "Invalid if statement; expression does not evaluate to a boolean.");
+        }
+        bool condition = std::get<bool>(value);
+
+        ++it;
+        if (condition) {
+          auto rendered = RenderTemplateHelper(it, end, context, expr);
+          if (!rendered.ok()) {
+            return evaluated.status();
+          }
+          auto [rendered_string, new_it] = rendered.value();
+          result += rendered_string;
+          it = new_it;
+        } else {
+          std::stack<std::string> skip_operators;
+          skip_operators.push("if");
+          while (it != end && !skip_operators.empty()) {
+            if (std::holds_alternative<TemplateControlFlowExpression>(*it)) {
+              auto expr = std::get<TemplateControlFlowExpression>(*it);
+              if (expr.command == "for") {
+                skip_operators.push("for");
+              } else if (expr.command == "endfor") {
+                if (skip_operators.top() != "for") {
+                  return absl::InvalidArgumentError(
+                      "Invalid endfor; no matching for loop.");
+                }
+                skip_operators.pop();
+              } else if (expr.command == "if") {
+                skip_operators.push("if");
+              } else if (expr.command == "endif") {
+                if (skip_operators.top() != "if") {
+                  return absl::InvalidArgumentError(
+                      "Invalid endif; no matching if statement.");
+                }
+                skip_operators.pop();
+              }
+              // TOOD: else
+            }
+            ++it;
+          }
+          // TODO: else
+        }
+      } else if (expr.command == "endif") {
+        if (control_flow_context && control_flow_context->command == "if") {
+          ++it;
+          return std::make_pair(result, it);
+        } else {
+          return absl::InvalidArgumentError(
+              "Invalid endfor; no matching for loop.");
+        }
+      } else {
+        return absl::InvalidArgumentError(
+            "Invalid control flow command; expected \"for\", \"endfor\", "
+            "\"if\", or \"endif\".");
+      }
+    }
+  }
+  return std::make_pair(result, it);
+}
 
 absl::StatusOr<std::string> RenderTemplate(
     const std::string& template_str,
     const std::unordered_map<std::string, CONTEXT_TYPE>& context) {
   auto tokenized = TokenizeTemplate(template_str);
-  std::string result = "";
-  for (auto segment : tokenized) {
-    if (std::holds_alternative<std::string>(segment)) {
-      result += std::get<std::string>(segment);
-    } else {
-      auto expression = std::get<TemplateInterpolationExpression>(segment);
-      auto evaluated = EvaluateExpression(expression.expression, context);
-      if (!evaluated.ok()) {
-        return evaluated.status();
-      }
-      result += evaluated.value();
-    }
+  auto rendered = RenderTemplateHelper(begin(tokenized), end(tokenized), 
+                                       context, {});
+  if (!rendered.ok()) {
+    return rendered.status();
   }
-  return result;
+  return rendered.value().first;
 }
 
 }  // namespace templates
